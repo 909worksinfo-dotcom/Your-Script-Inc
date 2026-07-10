@@ -1,0 +1,67 @@
+<section class="results-panel" id="results-panel-slot" data-results-revision="{{ results_revision or '' }}">
+  <div class="panel-title">📤 产出速览 · 已完成任务</div>
+  <p class="caption">已完成 <span data-runtime-done-count>{{ done_count }}</span>/<span data-runtime-total-count>{{ tasks|length }}</span> 个任务 · 任务 1 → 9 从上到下排列；点击任意任务可展开查看产出详情（默认折叠，只显示执行进度）。</p>
+  {% for task in tasks %}
+  <details class="st-expander" data-persist-key="result-task-{{ task.id }}">
+    <summary>任务 {{ task.id }} · {{ task.short }}　{{ task.owner_emoji }} {{ task.owner_name }}　{{ task.badge }}</summary>
+    {% if task.output %}
+      {% if task.id == 8 %}
+        {% for batch in task8_outputs %}
+        <h4>📑 分镜 · {{ batch.label }}</h4>
+        {% if batch.table.ok %}
+        <p class="qa-ok">✅ 解析成功　共 {{ batch.table.shot_count }} 个镜头 · {{ batch.table.episode_count }} 个分集标记</p>
+        <div class="table-wrap">
+          <table class="storyboard-table">
+            <thead><tr>{% for col in batch.table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+            <tbody>
+              {% for row in batch.table.rows %}
+              <tr>{% for col in batch.table.columns %}<td>{{ row[col] }}</td>{% endfor %}</tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <pre>{{ batch.content }}</pre>
+        {% endif %}
+        {% if batch.reviews %}
+        <details class="review-expander" data-persist-key="result-review-task8-{{ batch.label }}">
+          <summary>🧭 工作室管理者验收记录（{{ batch.reviews|length }} 轮，最新：{% if batch.reviews[-1].passed %}✅ 验收通过{% else %}🔁 验收未通过 / 已触发返工{% endif %}{% if batch.reviews[-1].score is not none %} · 评分 {{ batch.reviews[-1].score }}{% endif %}）</summary>
+          {% for item in batch.reviews %}
+          <div class="review-item">
+            <b>第 {{ item.round or '?' }} 轮 · {% if item.passed %}✅ 通过{% else %}🔁 未通过{% endif %} · {{ item.time or '' }}</b>
+            {% if item.summary %}<p class="caption">{{ item.summary }}</p>{% endif %}
+            {% if item.suggestions %}<div class="review-suggestions">{{ item.suggestions }}</div>{% endif %}
+          </div>
+          {% endfor %}
+        </details>
+        {% endif %}
+        {% endfor %}
+      {% else %}
+        {% if task.reviews %}
+        <details class="review-expander" data-persist-key="result-review-task-{{ task.id }}">
+          <summary>🧭 工作室管理者验收记录（{{ task.reviews|length }} 轮，最新：{% if task.reviews[-1].passed %}✅ 验收通过{% else %}🔁 验收未通过 / 已触发返工{% endif %}{% if task.reviews[-1].score is not none %} · 评分 {{ task.reviews[-1].score }}{% endif %}）</summary>
+          {% for item in task.reviews %}
+          <div class="review-item">
+            <b>第 {{ item.round or '?' }} 轮 · {% if item.passed %}✅ 通过{% else %}🔁 未通过{% endif %} · {{ item.time or '' }}</b>
+            {% if item.summary %}<p class="caption">{{ item.summary }}</p>{% endif %}
+            {% if item.suggestions %}<div class="review-suggestions">{{ item.suggestions }}</div>{% endif %}
+          </div>
+          {% endfor %}
+        </details>
+        {% endif %}
+        <div class="markdown-body">{{ task.output_html|safe }}</div>
+        {% if task.id == 9 %}
+        <details class="st-expander" data-persist-key="result-task9-preview">
+          <summary>📑 飞书文档渲染预览（含分镜表格）</summary>
+          <div class="markdown-body">{{ task.output_html|safe }}</div>
+        </details>
+        {% endif %}
+      {% endif %}
+    {% elif store.running_task == task.id %}
+      <div class="st-alert info">⏳ 正在执行…完成后这里会显示该任务产出。</div>
+    {% else %}
+      <p class="caption">尚未执行。</p>
+    {% endif %}
+  </details>
+  {% endfor %}
+</section>
