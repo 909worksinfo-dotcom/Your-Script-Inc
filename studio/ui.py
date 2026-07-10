@@ -469,7 +469,7 @@ def render_run_banner(store):
             st.rerun()
     if store.failed_task is not None:
         st.error(
-            f"⛔ 任务{store.failed_task} 失败（已完成最多 {TASK_MAX_RETRIES} 次 API 重试 / 管理者返工校验）。"
+            f"⛔ 任务{store.failed_task} 失败（已完成最多 {TASK_MAX_RETRIES} 次 API 重试 / 管理者验收多次失败需要返工）。"
             + (f"\n\n**失败原因**：{_failure_reason(store)}" if _failure_reason(store) else "")
             + "\n\n请依次排查：① 该数字员工的「模型配置」Provider / API Key 是否填写正确；"
             "② 网络是否能访问所选模型服务（内网 / Azure 等私有 endpoint 在公网会连接超时，并非程序本身问题）；"
