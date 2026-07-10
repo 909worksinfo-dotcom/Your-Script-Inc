@@ -5,6 +5,7 @@
 """
 
 import contextvars
+import hashlib
 import html
 import json
 import re
@@ -137,6 +138,28 @@ PIPELINE_PALETTE = {
     "ready": ("#d8a500", "#fdf6e3"),
     "idle": ("#b8b3a6", "#f6f4ee"),
 }
+API_FAILURE_HINT_KEYWORDS = (
+    "api",
+    "api key",
+    "key",
+    "endpoint",
+    "model",
+    "provider",
+    "unauthorized",
+    "invalid_api_key",
+    "invalid api key",
+    "rate limit",
+    "quota",
+    "401",
+    "403",
+    "429",
+    "模型",
+    "型号",
+    "服务商",
+    "请在侧边栏",
+    "填写 API Key",
+    "选择模型",
+)
 
 
 def _sprite_svg(shirt, hair):
@@ -577,6 +600,49 @@ def _task8_outputs():
     return rows
 
 
+def _stringify_output(value):
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return "\n".join(str(v) for v in value.values() if isinstance(v, str))
+    return ""
+
+
+def _api_failure_hint_needed():
+    failed_task = store.failed_task
+    if not failed_task:
+        return False
+    output_text = _stringify_output(store.outputs.get(failed_task))
+    recent_log = "\n".join(store.log[-80:])
+    text = f"{output_text}\n{recent_log}".lower()
+    return any(keyword.lower() in text for keyword in API_FAILURE_HINT_KEYWORDS)
+
+
+def _results_revision():
+    current = _current_store.get()
+    with current.lock:
+        payload = {
+            "outputs": current.outputs,
+            "manager_reviews": current.manager_reviews,
+            "running_task": current.running_task,
+            "failed_task": current.failed_task,
+            "is_running": current.is_running,
+        }
+        raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+def _render_results_panel():
+    tasks = _task_rows()
+    return templates.env.get_template("partials/results.html").render(
+        tasks=tasks,
+        task8_outputs=_task8_outputs(),
+        done_count=sum(1 for tid in TASK_ORDER if task_done(store, tid)),
+        store=store,
+        results_revision=_results_revision(),
+    )
+
+
 def _runtime_pipeline_rows(tasks):
     rows = []
     for task in tasks:
@@ -608,11 +674,13 @@ def _runtime_payload():
         "running_task": store.running_task,
         "running_employee_label": _running_employee_label(),
         "failed_task": store.failed_task,
+        "api_failure_hint": _api_failure_hint_needed(),
         "done_count": sum(1 for tid in TASK_ORDER if task_done(store, tid)),
         "total_tasks": len(TASK_ORDER),
         "pipeline_rows": _runtime_pipeline_rows(tasks),
         "log_text": "\n".join(store.log[-200:]),
         "last_saved_at": getattr(store, "last_saved_at", ""),
+        "results_revision": _results_revision(),
     }
 
 
@@ -642,11 +710,13 @@ def _snapshot_view(tab, mode="auto", confirm_doc=None):
         "task8_scripts": store.outputs.get(8) if isinstance(store.outputs.get(8), dict) else {},
         "task8_outputs": _task8_outputs(),
         "done_count": sum(1 for tid in TASK_ORDER if task_done(store, tid)),
+        "results_revision": _results_revision(),
         "task_max_retries": TASK_MAX_RETRIES,
         "office_url": "/studio_office.png",
         "log_text": "\n".join(store.log[-200:]),
         "per_emp_enabled": per_emp_enabled,
         "running_employee_label": _running_employee_label(),
+        "api_failure_hint": _api_failure_hint_needed(),
         "confirm_doc": confirm_doc,
     }
 
@@ -992,6 +1062,11 @@ def download_doc(index: int):
 @app.get("/health")
 def health():
     return {"ok": True, "running": store.is_running}
+
+
+@app.get("/partials/results", response_class=HTMLResponse)
+def partial_results():
+    return HTMLResponse(_render_results_panel())
 
 
 @app.get("/api/runtime")
