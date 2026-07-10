@@ -162,15 +162,19 @@
           <form method="post" action="/dismiss-interrupted" class="inline"><button>忽略该提示</button></form>
         </div>
         {% endif %}
-        {% if store.is_running %}
-        <div class="run-banner">
-          <div>⏳ 后台正在执行 · 当前：任务{{ store.running_task or '准备中' }}{% if running_employee_label %} · 当前员工：{{ running_employee_label }}{% endif %}</div>
-          <form method="post" action="/stop"><button>⏹ 停止自动执行</button></form>
+        <div id="run-banner-slot">
+          {% if store.is_running %}
+          <div class="run-banner">
+            <div>⏳ 后台正在执行 · 当前：任务{{ store.running_task or '准备中' }}{% if running_employee_label %} · 当前员工：{{ running_employee_label }}{% endif %}</div>
+            <form method="post" action="/stop"><button>⏹ 停止自动执行</button></form>
+          </div>
+          {% endif %}
         </div>
-        {% endif %}
-        {% if store.failed_task %}
-        <div class="st-alert danger">⛔ 任务{{ store.failed_task }} 失败（已完成最多 {{ task_max_retries }} 次 API 重试 / 管理者返工校验）。请检查模型配置、API Key、网络与 endpoint。</div>
-        {% endif %}
+        <div id="failed-alert-slot">
+          {% if store.failed_task %}
+          <div class="st-alert danger">⛔ 任务{{ store.failed_task }} 失败（已完成最多 {{ task_max_retries }} 次 API 重试 / 管理者返工校验）。请检查模型配置、API Key、网络与 endpoint。</div>
+          {% endif %}
+        </div>
 
         <section class="st-container">
           <div class="mode-title">🕹️ 运营方式 · 选择执行方式</div>
@@ -216,7 +220,7 @@
           <div class="st-alert info">按顺序逐个点击任务按钮启动对应数字员工；每个任务产出后可【修改】再进入下一步，也可【跳过本任务】直接粘贴本地剧本文本后保存，再继续下一步；也可随时点击下方按钮，让产品【自动跑完后续剩余任务】（后台执行，断连不中断）。</div>
           <div class="manual-rest">
             <form method="post" action="/run/rest"><button class="primary full" {% if store.is_running or done_count == tasks|length %}disabled{% endif %}>🚀 自动执行后续剩余任务</button></form>
-            <p class="caption">已完成 {{ done_count }}/{{ tasks|length }} 个任务。点击后将从“当前进度的下一个任务”开始往后自动执行。</p>
+            <p class="caption">已完成 <span data-runtime-done-count>{{ done_count }}</span>/<span data-runtime-total-count>{{ tasks|length }}</span> 个任务。点击后将从“当前进度的下一个任务”开始往后自动执行。</p>
           </div>
 
           {% for task in tasks %}
@@ -346,7 +350,7 @@
         <hr>
         <section class="results-panel">
           <div class="panel-title">📤 产出速览 · 已完成任务</div>
-          <p class="caption">已完成 {{ done_count }}/{{ tasks|length }} 个任务 · 任务 1 → 9 从上到下排列；点击任意任务可展开查看产出详情（默认折叠，只显示执行进度）。</p>
+          <p class="caption">已完成 <span data-runtime-done-count>{{ done_count }}</span>/<span data-runtime-total-count>{{ tasks|length }}</span> 个任务 · 任务 1 → 9 从上到下排列；点击任意任务可展开查看产出详情（默认折叠，只显示执行进度）。</p>
           {% for task in tasks %}
           <details class="st-expander" data-persist-key="result-task-{{ task.id }}">
             <summary>任务 {{ task.id }} · {{ task.short }}　{{ task.owner_emoji }} {{ task.owner_name }}　{{ task.badge }}</summary>
@@ -420,7 +424,7 @@
         </div>
         <h5>🔗 协作流水线 · 9 大任务</h5>
         <div class="pv">
-          <div class="pipeline">
+          <div class="pipeline" id="runtime-pipeline">
             {% for task in pipeline_rows %}
             <div class="pnode" style="border-color:{{ task.color }};background:{{ task.bg }}">
               <span class="pn-id" style="color:{{ task.color }}">任务 {{ task.id }}</span>
@@ -431,13 +435,13 @@
           </div>
           <div class="legend"><span style="color:#16a34a">●已完成</span>　<span style="color:#5147ff">●工作中</span>　<span style="color:#d8a500">●可执行</span>　<span style="color:#b8b3a6">●等待依赖</span></div>
         </div>
-        {% if log_text %}
-        <hr>
-        <details class="st-expander" {% if store.is_running %}open{% endif %}>
-          <summary>🛰️ 运行过程日志（实时 · 刷新/重连不丢失）</summary>
-	          <pre class="log" data-log-scroll="run-log" data-running="{% if store.is_running %}1{% else %}0{% endif %}">{{ log_text }}</pre>
-        </details>
-        {% endif %}
+        <div id="run-log-section" {% if not log_text and not store.is_running %}hidden{% endif %}>
+          <hr>
+          <details class="st-expander" {% if store.is_running %}open{% endif %}>
+            <summary>🛰️ 运行过程日志（实时 · 刷新/重连不丢失）</summary>
+            <pre class="log" data-log-scroll="run-log" data-running="{% if store.is_running %}1{% else %}0{% endif %}">{{ log_text }}</pre>
+          </details>
+        </div>
       </aside>
     </section>
     {% endif %}
@@ -669,6 +673,112 @@
 	      window.addEventListener("pagehide", saveLogScroll);
 	      window.addEventListener("beforeunload", saveLogScroll);
 	    }
+
+	    function escapeHtml(value) {
+	      return String(value ?? "")
+	        .replaceAll("&", "&amp;")
+	        .replaceAll("<", "&lt;")
+	        .replaceAll(">", "&gt;")
+	        .replaceAll('"', "&quot;")
+	        .replaceAll("'", "&#39;");
+	    }
+
+	    function updateRunBanner(data) {
+	      const slot = document.getElementById("run-banner-slot");
+	      if (!slot) return;
+	      if (!data.running) {
+	        slot.innerHTML = "";
+	        return;
+	      }
+	      const current = data.running_task || "准备中";
+	      const employee = data.running_employee_label ? ` · 当前员工：${escapeHtml(data.running_employee_label)}` : "";
+	      slot.innerHTML = `
+	        <div class="run-banner">
+	          <div>⏳ 后台正在执行 · 当前：任务${escapeHtml(current)}${employee}</div>
+	          <form method="post" action="/stop"><button>⏹ 停止自动执行</button></form>
+	        </div>
+	      `;
+	    }
+
+	    function updateFailedAlert(data) {
+	      const slot = document.getElementById("failed-alert-slot");
+	      if (!slot) return;
+	      if (!data.failed_task) {
+	        slot.innerHTML = "";
+	        return;
+	      }
+	      slot.innerHTML = `<div class="st-alert danger">⛔ 任务${escapeHtml(data.failed_task)} 失败（已完成最多 {{ task_max_retries }} 次 API 重试 / 管理者返工校验）。请检查模型配置、API Key、网络与 endpoint。</div>`;
+	    }
+
+	    function updateDoneCounts(data) {
+	      document.querySelectorAll("[data-runtime-done-count]").forEach((node) => {
+	        node.textContent = data.done_count ?? 0;
+	      });
+	      document.querySelectorAll("[data-runtime-total-count]").forEach((node) => {
+	        node.textContent = data.total_tasks ?? {{ tasks|length }};
+	      });
+	    }
+
+	    function updatePipeline(data) {
+	      const pipeline = document.getElementById("runtime-pipeline");
+	      if (!pipeline || !Array.isArray(data.pipeline_rows)) return;
+	      pipeline.innerHTML = data.pipeline_rows.map((task) => `
+	        <div class="pnode" style="border-color:${escapeHtml(task.color)};background:${escapeHtml(task.bg)}">
+	          <span class="pn-id" style="color:${escapeHtml(task.color)}">任务 ${escapeHtml(task.id)}</span>
+	          <b>${escapeHtml(task.short)}</b>
+	          <span class="pn-owner">${escapeHtml(task.owner_emoji)} ${escapeHtml(task.owner_name)}</span>
+	        </div>
+	      `).join("");
+	    }
+
+	    function updateLogSection(data) {
+	      const section = document.getElementById("run-log-section");
+	      const log = getRunLogNode();
+	      if (!section || !log) return;
+	      const wasPinnedBottom = log.scrollHeight - log.clientHeight - log.scrollTop <= 24;
+	      const previousTop = log.scrollTop;
+	      const nextText = data.log_text || "";
+	      section.hidden = !nextText && !data.running;
+	      log.dataset.running = data.running ? "1" : "0";
+	      if (log.textContent !== nextText) {
+	        log.textContent = nextText;
+	      }
+	      requestAnimationFrame(() => {
+	        if (wasPinnedBottom || localStorage.getItem("scriptStudioLogScrollPinnedBottom") === "1") {
+	          log.scrollTop = log.scrollHeight;
+	        } else {
+	          log.scrollTop = Math.min(previousTop, Math.max(0, log.scrollHeight - log.clientHeight));
+	        }
+	        saveLogScroll();
+	      });
+	    }
+
+	    let runtimeWasRunning = {% if store.is_running %}true{% else %}false{% endif %};
+	    let runtimeCompletionReloaded = false;
+
+	    function applyRuntimeUpdate(data) {
+	      updateRunBanner(data);
+	      updateFailedAlert(data);
+	      updateDoneCounts(data);
+	      updatePipeline(data);
+	      updateLogSection(data);
+	      if (data.running) {
+	        runtimeWasRunning = true;
+	        return;
+	      }
+	      if (runtimeWasRunning && !runtimeCompletionReloaded) {
+	        runtimeCompletionReloaded = true;
+	        saveLogScroll();
+	        window.setTimeout(() => window.location.reload(), 250);
+	      }
+	    }
+
+	    function pollRuntime() {
+	      fetch("/api/runtime", { cache: "no-store" })
+	        .then((response) => response.ok ? response.json() : Promise.reject())
+	        .then(applyRuntimeUpdate)
+	        .catch(() => {});
+	    }
 	    function refreshDarkModeButton() {
 	      const button = document.getElementById("dark-toggle-button");
 	      if (!button) return;
@@ -694,12 +804,7 @@
     initSidebarResize();
 	    restoreLogScroll();
     {% if store.is_running %}
-    setInterval(() => {
-	      fetch("/health").then(() => {
-	        saveLogScroll();
-	        window.location.reload();
-	      }).catch(() => {});
-    }, 2000);
+	    window.setInterval(pollRuntime, 2000);
     {% endif %}
   </script>
 </body>
