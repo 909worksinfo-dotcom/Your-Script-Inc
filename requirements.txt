@@ -1,0 +1,9 @@
+streamlit
+pandas
+google-generativeai
+openai
+anthropic
+fastapi
+uvicorn
+jinja2
+python-multipart

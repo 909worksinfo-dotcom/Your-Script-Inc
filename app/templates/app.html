@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Agent 短剧剧本工作室</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <aside class="st-sidebar">
+    <button class="sidebar-collapse" type="button" onclick="toggleSidebar()" aria-label="收起左栏">⏴</button>
+    <form method="post" action="/config" id="sidebar-config">
+      <h2>⚙️ 模型配置</h2>
+      <div class="side-space"></div>
+      <div class="side-bold">全局默认（应用于所有数字员工）</div>
+
+      {% set global_cfg = global_config %}
+      {% set global_model_display = '' if global_cfg.provider == 'Mock (演示)' and global_cfg.model == 'mock-studio-model' else global_cfg.model %}
+	      <input type="hidden" name="global_rendered_provider" value="{{ global_cfg.provider }}">
+      <label>API 服务商</label>
+      <select name="global_provider" onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}>
+        {% for provider in providers %}
+        <option value="{{ provider }}" {% if global_cfg.provider == provider %}selected{% endif %}>{{ provider }}</option>
+        {% endfor %}
+      </select>
+
+      {% if global_cfg.provider != 'Mock (演示)' %}
+      <label>API Key</label>
+      <div class="api-key-row">
+        <input class="api-key-input" type="password" name="global_key" value="{{ global_cfg.key or '' }}" placeholder="请输入 API Key" onchange="this.form.submit()" autocomplete="off" {% if store.is_running %}disabled{% endif %}>
+        <button class="api-key-toggle" type="button" onclick="toggleApiKeyVisibility(this)" onmousedown="event.preventDefault()" aria-pressed="false" {% if store.is_running %}disabled{% endif %}>显示</button>
+      </div>
+      {% endif %}
+
+      <label>模型</label>
+      <select name="global_selected_model" onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}>
+        <option value="" {% if not global_model_display %}selected{% endif %}>请选择</option>
+        {% for model in models.get(global_cfg.provider, []) %}
+        <option value="{{ model }}" {% if global_model_display == model %}selected{% endif %}>{{ model }}</option>
+        {% endfor %}
+      </select>
+      <label>手动输入模型型号（可选，非空则优先使用）</label>
+      <input name="global_custom_model" placeholder="例如：gpt-4o-2024-08-06" value="{% if global_model_display and global_model_display not in models.get(global_cfg.provider, []) %}{{ global_model_display }}{% endif %}" onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}>
+      {% if global_model_display %}
+      <p class="caption">实际调用模型：<code>{{ global_model_display }}</code></p>
+      {% else %}
+      <p class="caption">实际调用模型：请先选择模型或手动输入模型型号</p>
+      {% endif %}
+
+      <hr>
+      <label class="checkline">
+        <input type="checkbox" name="per_emp" {% if per_emp_enabled %}checked{% endif %} onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}>
+        🧩 为每位数字员工单独配置模型
+      </label>
+      {% if per_emp_enabled %}
+	      <details class="side-expander" open data-persist-key="sidebar-emp-config-root">
+        <summary>逐员工模型配置</summary>
+        <p class="caption">未单独配置的员工沿用全局默认。</p>
+        {% for emp in employees %}
+        {% set emp_model_display = '' if emp.config.provider == 'Mock (演示)' and emp.config.model == 'mock-studio-model' else emp.config.model %}
+	        <details class="side-expander nested" data-persist-key="sidebar-emp-config-{{ emp.key }}">
+          <summary>{{ emp.emoji }} {{ emp.name }}</summary>
+	          <input type="hidden" name="emp_{{ emp.key }}_rendered_provider" value="{{ emp.config.provider }}">
+          <label>API 服务商</label>
+          <select name="emp_{{ emp.key }}_provider" onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}>
+            {% for provider in providers %}
+            <option value="{{ provider }}" {% if emp.config.provider == provider %}selected{% endif %}>{{ provider }}</option>
+            {% endfor %}
+          </select>
+          {% if emp.config.provider != 'Mock (演示)' %}
+          <label>API Key</label>
+          <div class="api-key-row">
+            <input class="api-key-input" type="password" name="emp_{{ emp.key }}_key" value="{{ emp.config.key or '' }}" placeholder="请输入 API Key" onchange="this.form.submit()" autocomplete="off" {% if store.is_running %}disabled{% endif %}>
+            <button class="api-key-toggle" type="button" onclick="toggleApiKeyVisibility(this)" onmousedown="event.preventDefault()" aria-pressed="false" {% if store.is_running %}disabled{% endif %}>显示</button>
+          </div>
+          {% endif %}
+          <label>模型</label>
+          <select name="emp_{{ emp.key }}_selected_model" onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}>
+            <option value="" {% if not emp_model_display %}selected{% endif %}>请选择</option>
+            {% for model in models.get(emp.config.provider, []) %}
+            <option value="{{ model }}" {% if emp_model_display == model %}selected{% endif %}>{{ model }}</option>
+            {% endfor %}
+          </select>
+          <label>手动输入模型型号（可选，非空则优先使用）</label>
+          <input name="emp_{{ emp.key }}_custom_model" value="{% if emp_model_display and emp_model_display not in models.get(emp.config.provider, []) %}{{ emp_model_display }}{% endif %}" onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}>
+        </details>
+        {% endfor %}
+      </details>
+      {% endif %}
+
+      <hr>
+      <div class="side-bold">📂 项目设置</div>
+      <label>剧本总集数</label>
+      <input type="number" name="total_episodes" min="1" max="100" value="{{ store.total_episodes }}" onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}>
+
+      <label>分镜脚本模式</label>
+      <div class="radio-stack">
+        <label><input type="radio" name="script_mode" value="standard" {% if store.script_mode == 'standard' %}checked{% endif %} onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}> 剧本分镜脚本 (标准短剧)</label>
+        <label><input type="radio" name="script_mode" value="comic" {% if store.script_mode == 'comic' %}checked{% endif %} onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}> 解说漫分镜脚本 (小说推文/漫改)</label>
+      </div>
+      <input type="hidden" name="seed" value="{{ store.seed }}">
+    </form>
+
+    <hr>
+    <div class="side-bold">🧑‍💼 数字员工花名册</div>
+    <p class="caption">详细角色介绍 / 工作技能（可编辑）见顶部「设定中心」。</p>
+    {% for emp in employees %}
+    <details class="side-expander">
+      <summary>{{ emp.emoji }} {{ emp.name }}　{% if emp.state == 'working' %}🟣 工作中{% elif emp.state == 'done' %}🟢 已完成{% else %}⚪ 待命{% endif %}</summary>
+      <p class="caption">{{ emp.title }}</p>
+      <p><b>当前模型</b>：<code>{{ emp.config.provider }} / {% if emp.config.provider == 'Mock (演示)' and emp.config.model == 'mock-studio-model' %}请选择{% else %}{{ emp.config.model or '请选择' }}{% endif %}</code></p>
+      <p><b>记忆</b>：{% if emp.memory %}已累积 {{ emp.memory|length }} 条{% else %}暂无（执行后写入）{% endif %}</p>
+    </details>
+    {% endfor %}
+
+    <hr>
+    <form method="post" action="/reset">
+      <button class="full" type="submit">♻️ 重置工作室（清空所有产出）</button>
+    </form>
+    <p class="caption">（重置仅清空产出与过程；不影响你的自定义设定与「交付文档库」历史）</p>
+  </aside>
+  <div id="sidebar-resize-handle" class="sidebar-resize-handle" role="separator" aria-orientation="vertical" title="拖拽调整左栏宽度"></div>
+  <button class="sidebar-expand" type="button" onclick="toggleSidebar()" aria-label="展开左栏">⏵</button>
+
+  <main class="st-main">
+    <div class="top-toolbar">
+      <button type="button" onclick="clearUiCache()" title="Clear Cache">🧹 Clear Cache</button>
+      <button type="button" id="dark-toggle-button" onclick="toggleDarkMode()" title="Dark mode" aria-label="切换深色模式">🌙 Dark</button>
+    </div>
+    <div class="studio-title">🎬 AI Agent 短剧剧本工作室</div>
+    <div class="studio-sub">工作室管理者调度 5 位创作数字员工，自动验收与返工，全流程可视化产出 1 部极致优质的海外短剧剧本。　左栏配置 · 中栏实时执行 · 右栏产出速览 · 顶部切换设定中心与交付文档库。</div>
+
+    <nav class="top-tabs">
+      <a href="/?tab=studio&mode={{ mode }}" class="{% if tab == 'studio' %}active{% endif %}">🎬 工作台</a>
+      <a href="/?tab=settings" class="{% if tab == 'settings' %}active{% endif %}">📋 设定中心 · 协作方式 & 员工档案</a>
+      <a href="/?tab=docs" class="{% if tab == 'docs' %}active{% endif %}">📚 交付文档库（{{ store.doc_history|length }}）</a>
+    </nav>
+
+    {% if tab == 'studio' %}
+    <button class="right-expand" type="button" onclick="toggleRightbar()">🔗 展开 ⏵</button>
+    <section class="workbench">
+      <section class="wb-center">
+        <div class="panel-title">🏢 数字员工办公室</div>
+        <h5>🏢 数字员工办公室 · 实时工作状态</h5>
+        <div class="office-scene" style="background-image:url('{{ office_url }}')">
+          {% for emp in employees %}
+          <div class="emp-pin {{ emp.state }}" style="left:{{ emp.pos[0] }}%;top:{{ emp.pos[1] }}%" title="{{ emp.pin_title }}">
+            <div class="halo"></div>
+            {{ emp.sprite|safe }}
+            <div class="tag">{{ emp.emoji }} {{ emp.short }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="office-cap">🟣 形象跳动+高亮光圈＝该员工正在工作　·　🟢 名牌变绿＝已完成　·　⚪ 常态＝待命（鼠标悬停查看详情）</div>
+
+        <hr>
+
+        {% if store.interrupted_task %}
+        <div class="st-alert warning">
+          ⚠️ 检测到上次执行在任务{{ store.interrupted_task }}中断。可从当前已完成进度继续执行，任务8会自动跳过已成功批次。
+          <form method="post" action="/resume" class="inline"><button class="primary">▶️ 继续执行中断任务</button></form>
+          <form method="post" action="/dismiss-interrupted" class="inline"><button>忽略该提示</button></form>
+        </div>
+        {% endif %}
+        {% if store.is_running %}
+        <div class="run-banner">
+          <div>⏳ 后台正在执行 · 当前：任务{{ store.running_task or '准备中' }}{% if running_employee_label %} · 当前员工：{{ running_employee_label }}{% endif %}</div>
+          <form method="post" action="/stop"><button>⏹ 停止自动执行</button></form>
+        </div>
+        {% endif %}
+        {% if store.failed_task %}
+        <div class="st-alert danger">⛔ 任务{{ store.failed_task }} 失败（已完成最多 {{ task_max_retries }} 次 API 重试 / 管理者返工校验）。请检查模型配置、API Key、网络与 endpoint。</div>
+        {% endif %}
+
+        <section class="st-container">
+          <div class="mode-title">🕹️ 运营方式 · 选择执行方式</div>
+          <div class="mode-radio">
+            <label class="{% if mode == 'auto' %}selected{% endif %}">
+              <input type="radio" name="run_mode_radio" {% if mode == 'auto' %}checked{% endif %} onchange="window.location='/?tab=studio&mode=auto'">
+              ① 自动按序执行（一键运行全流程）
+            </label>
+            <label class="{% if mode == 'manual' %}selected{% endif %}">
+              <input type="radio" name="run_mode_radio" {% if mode == 'manual' %}checked{% endif %} onchange="window.location='/?tab=studio&mode=manual'">
+              ② 手动逐步启动（逐个任务点击执行）
+            </label>
+          </div>
+        </section>
+
+        <details class="st-expander" open>
+          <summary>✏️ （可选）为「短剧爆款研究员」提供创作方向 / 赛道（留空则由其自主选择）</summary>
+          <form method="post" action="/config">
+	            <input type="hidden" name="global_rendered_provider" value="{{ global_cfg.provider }}">
+            <input type="hidden" name="global_provider" value="{{ global_cfg.provider }}">
+            <input type="hidden" name="global_selected_model" value="{% if global_model_display in models.get(global_cfg.provider, []) %}{{ global_model_display }}{% endif %}">
+            <input type="hidden" name="global_custom_model" value="{% if global_model_display and global_model_display not in models.get(global_cfg.provider, []) %}{{ global_model_display }}{% endif %}">
+            <input type="hidden" name="total_episodes" value="{{ store.total_episodes }}">
+            <input type="hidden" name="script_mode" value="{{ store.script_mode }}">
+            {% if per_emp_enabled %}<input type="hidden" name="per_emp" value="on">{% endif %}
+            <textarea name="seed" rows="4" placeholder="例如：赛博朋克 + 底层逆袭；或：女频 狼人 虐恋……（留空则研究员自主决策）" onchange="this.form.submit()" {% if store.is_running %}disabled{% endif %}>{{ store.seed }}</textarea>
+          </form>
+        </details>
+
+        {% if mode == 'auto' %}
+        <section class="task-section">
+          <h3>🤖 自动按序执行</h3>
+          <div class="st-alert info">点击下方按钮，工作室管理者将调度 5 位创作数字员工依次完成任务 1 → 9，每个任务产出后自动验收，不合格则带修改意见返工，最终自动产出飞书交付文档。中途如遇问题，可切换至② 手动逐步启动继续任务。每次任务结束后需点击右上角Clear Cache清除残留缓存</div>
+          <div class="auto-row">
+            <form method="post" action="/run/all"><button class="primary full" {% if store.is_running %}disabled{% endif %}>🚀 一键运行全流程</button></form>
+            <p class="caption">当前总集数：{{ store.total_episodes }} 集 · 大纲与分镜均自动分批生成。</p>
+          </div>
+          <p class="caption">▶ 各任务产出会在右侧「产出速览」面板即时显示；完整剧本飞书文档见顶部「📚 交付文档库」。</p>
+        </section>
+        {% else %}
+        <section class="task-section">
+          <h3>🙋 手动逐步启动</h3>
+          <div class="st-alert info">按顺序逐个点击任务按钮启动对应数字员工；每个任务产出后可【修改】再进入下一步，也可【跳过本任务】直接粘贴本地剧本文本后保存，再继续下一步；也可随时点击下方按钮，让产品【自动跑完后续剩余任务】（后台执行，断连不中断）。</div>
+          <div class="manual-rest">
+            <form method="post" action="/run/rest"><button class="primary full" {% if store.is_running or done_count == tasks|length %}disabled{% endif %}>🚀 自动执行后续剩余任务</button></form>
+            <p class="caption">已完成 {{ done_count }}/{{ tasks|length }} 个任务。点击后将从“当前进度的下一个任务”开始往后自动执行。</p>
+          </div>
+
+          {% for task in tasks %}
+          <section class="manual-card">
+            <div class="task-head">
+              <b>任务 {{ task.id }} · {{ task.title }}</b>
+              <span>{{ task.owner_emoji }} <b>{{ task.owner_name }}</b></span>
+              <em>{{ task.badge }}</em>
+            </div>
+            <p class="caption">{{ task.desc }}</p>
+            {% if not task.ready and not store.is_running %}
+            <p class="caption">🔒 该任务依赖前序任务。可先手动执行前序任务，或在下方“修改 / 粘贴”里粘贴本地文本保存以跳过。</p>
+            {% endif %}
+
+            {% if task.id == 8 %}
+            <div class="button-grid">
+              {% for batch in task8_batches %}
+              <form method="post" action="/run/task8/{{ batch.start }}/{{ batch.end }}">
+                <button {% if store.is_running or not task.ready %}disabled{% endif %}>生成 {{ batch.label }}{% if task8_scripts.get(batch.label) %} ✅{% endif %}</button>
+              </form>
+              {% endfor %}
+            </div>
+            <form method="post" action="/run/task8/all"><button {% if store.is_running or not task.ready %}disabled{% endif %}>⚡ 一键生成全部批次分镜</button></form>
+            {% if task8_scripts %}
+            <form method="post" action="/task8/clear"><button {% if store.is_running %}disabled{% endif %}>🧹 清空全部分镜（任务8）</button></form>
+            <details class="st-expander" open data-persist-key="manual-task8-table">
+              <summary>📄 查看分镜表格</summary>
+              {% for batch in task8_outputs %}
+              <details class="st-expander" data-persist-key="manual-task8-batch-{{ batch.label }}">
+                <summary>📑 分镜 · {{ batch.label }}</summary>
+                <p class="caption">分镜模式：{% if store.script_mode == 'comic' %}解说漫{% else %}标准短剧{% endif %}</p>
+                {% if batch.table.ok %}
+                <p class="qa-ok">✅ 解析成功　共 {{ batch.table.shot_count }} 个镜头 · {{ batch.table.episode_count }} 个分集标记</p>
+                <div class="table-wrap">
+                  <table class="storyboard-table">
+                    <thead><tr>{% for col in batch.table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+                    <tbody>
+                      {% for row in batch.table.rows %}
+                      <tr>{% for col in batch.table.columns %}<td>{{ row[col] }}</td>{% endfor %}</tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+                {% else %}
+                <p class="qa-warn">⚠️ 未检测到有效分镜内容，展示原始返回：</p>
+                <pre>{{ batch.content }}</pre>
+                {% endif %}
+                <a class="download" href="/download/task8?label={{ batch.label }}">📥 下载 {{ batch.label }} CSV (Excel 专用)</a>
+                {% if batch.reviews %}
+                <details class="review-expander" data-persist-key="review-task8-{{ batch.label }}">
+                  <summary>🧭 工作室管理者验收记录（{{ batch.reviews|length }} 轮，最新：{% if batch.reviews[-1].passed %}✅ 验收通过{% else %}🔁 验收未通过 / 已触发返工{% endif %}{% if batch.reviews[-1].score is not none %} · 评分 {{ batch.reviews[-1].score }}{% endif %}）</summary>
+                  {% for item in batch.reviews %}
+                  <div class="review-item">
+                    <b>第 {{ item.round or '?' }} 轮 · {% if item.passed %}✅ 通过{% else %}🔁 未通过{% endif %} · {{ item.time or '' }}</b>
+                    {% if item.summary %}<p class="caption">{{ item.summary }}</p>{% endif %}
+                    {% if item.suggestions %}<div class="review-suggestions">{{ item.suggestions }}</div>{% endif %}
+                  </div>
+                  {% endfor %}
+                </details>
+                {% endif %}
+              </details>
+              {% endfor %}
+            </details>
+            <details class="st-expander" data-persist-key="manual-task8-edit">
+              <summary>✏️ 修改已生成的分镜批次（CSV）</summary>
+              {% for batch in task8_outputs %}
+              <form method="post" action="/task8/update" class="batch-edit-form">
+                <b>批次 {{ batch.label }}</b>
+                <input type="hidden" name="label" value="{{ batch.label }}">
+                <textarea name="content" rows="8">{{ batch.content }}</textarea>
+                <button {% if store.is_running %}disabled{% endif %}>💾 保存批次 {{ batch.label }}</button>
+              </form>
+              {% endfor %}
+            </details>
+            {% endif %}
+            <details class="st-expander" {% if not task8_scripts %}open{% endif %} data-persist-key="manual-task8-paste">
+              <summary>📋 跳过生成 · 直接粘贴本地分镜（新建批次）</summary>
+              <form method="post" action="/task8/save">
+                <p class="caption">适用于直接使用本地已有分镜：建议保持 CSV 表头格式，并以“第 X 集”单独成行。</p>
+                <label>批次名称：</label>
+                <input name="label" value="本地粘贴">
+                <label>粘贴本地分镜 CSV：</label>
+                <textarea name="content" rows="8" placeholder="第 1 集&#10;镜号,场景,画面内容 (Visual),台词 (Dialogue) & 音效 (SFX)"></textarea>
+                <button {% if store.is_running %}disabled{% endif %}>📌 保存为分镜批次</button>
+              </form>
+            </details>
+            {% else %}
+            <form method="post" action="/run/task/{{ task.id }}">
+              <button class="{% if task.ready and not task.done %}primary{% endif %}" {% if store.is_running or not task.ready %}disabled{% endif %}>{% if task.done %}▶️ 重新执行{% else %}▶️ 启动该任务（调用数字员工生成）{% endif %}</button>
+            </form>
+            <details class="st-expander" {% if task.done %}open{% endif %} data-persist-key="manual-output-task-{{ task.id }}">
+              <summary>📄 查看 / ✏️ 修改 / 📋 粘贴本任务产出</summary>
+              {% if task.reviews %}
+              <details class="review-expander" data-persist-key="manual-review-task-{{ task.id }}">
+                <summary>🧭 工作室管理者验收记录（{{ task.reviews|length }} 轮，最新：{% if task.reviews[-1].passed %}✅ 验收通过{% else %}🔁 验收未通过 / 已触发返工{% endif %}{% if task.reviews[-1].score is not none %} · 评分 {{ task.reviews[-1].score }}{% endif %}）</summary>
+                {% for item in task.reviews %}
+                <div class="review-item">
+                  <b>第 {{ item.round or '?' }} 轮 · {% if item.passed %}✅ 通过{% else %}🔁 未通过{% endif %} · {{ item.time or '' }}</b>
+                  {% if item.summary %}<p class="caption">{{ item.summary }}</p>{% endif %}
+                  {% if item.suggestions %}<div class="review-suggestions">{{ item.suggestions }}</div>{% endif %}
+                </div>
+                {% endfor %}
+              </details>
+              {% endif %}
+              {% if task.id in [5, 7] and task.output %}
+              <p class="qa-ok">集数校验：检测到 {{ task.outline_count }} 集 / 目标 {{ store.total_episodes }} 集</p>
+              {% endif %}
+              <form method="post" action="/task/{{ task.id }}/save">
+                <label>本任务产出（可直接修改 AI 产出；也可粘贴本地剧本文本后“保存”以跳过本任务）：</label>
+                <textarea name="content" rows="14">{{ task.output }}</textarea>
+                <div class="compact-actions">
+                  <button {% if store.is_running %}disabled{% endif %}>💾 保存为本任务产出</button>
+                  <button formaction="/task/{{ task.id }}/clear" {% if store.is_running %}disabled{% endif %}>🧹 清空</button>
+                  {% if task.output %}<a class="download" href="/download/task/{{ task.id }}">📥 下载该产出 (TXT)</a>{% endif %}
+                </div>
+              </form>
+              {% if task.id == 9 and task.output %}
+              <a class="download" href="/download/task/{{ task.id }}">📥 下载飞书最终交付文档 (Markdown)</a>
+              {% endif %}
+            </details>
+            {% endif %}
+          </section>
+          {% endfor %}
+        </section>
+        {% endif %}
+
+        <hr>
+        <section class="results-panel">
+          <div class="panel-title">📤 产出速览 · 已完成任务</div>
+          <p class="caption">已完成 {{ done_count }}/{{ tasks|length }} 个任务 · 任务 1 → 9 从上到下排列；点击任意任务可展开查看产出详情（默认折叠，只显示执行进度）。</p>
+          {% for task in tasks %}
+          <details class="st-expander" data-persist-key="result-task-{{ task.id }}">
+            <summary>任务 {{ task.id }} · {{ task.short }}　{{ task.owner_emoji }} {{ task.owner_name }}　{{ task.badge }}</summary>
+            {% if task.output %}
+              {% if task.id == 8 %}
+                {% for batch in task8_outputs %}
+                <h4>📑 分镜 · {{ batch.label }}</h4>
+                {% if batch.table.ok %}
+                <p class="qa-ok">✅ 解析成功　共 {{ batch.table.shot_count }} 个镜头 · {{ batch.table.episode_count }} 个分集标记</p>
+                <div class="table-wrap">
+                  <table class="storyboard-table">
+                    <thead><tr>{% for col in batch.table.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+                    <tbody>
+                      {% for row in batch.table.rows %}
+                      <tr>{% for col in batch.table.columns %}<td>{{ row[col] }}</td>{% endfor %}</tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+                {% else %}
+                <pre>{{ batch.content }}</pre>
+                {% endif %}
+                {% if batch.reviews %}
+                <details class="review-expander" data-persist-key="result-review-task8-{{ batch.label }}">
+                  <summary>🧭 工作室管理者验收记录（{{ batch.reviews|length }} 轮，最新：{% if batch.reviews[-1].passed %}✅ 验收通过{% else %}🔁 验收未通过 / 已触发返工{% endif %}{% if batch.reviews[-1].score is not none %} · 评分 {{ batch.reviews[-1].score }}{% endif %}）</summary>
+                  {% for item in batch.reviews %}
+                  <div class="review-item">
+                    <b>第 {{ item.round or '?' }} 轮 · {% if item.passed %}✅ 通过{% else %}🔁 未通过{% endif %} · {{ item.time or '' }}</b>
+                    {% if item.summary %}<p class="caption">{{ item.summary }}</p>{% endif %}
+                    {% if item.suggestions %}<div class="review-suggestions">{{ item.suggestions }}</div>{% endif %}
+                  </div>
+                  {% endfor %}
+                </details>
+                {% endif %}
+                {% endfor %}
+              {% else %}
+                {% if task.reviews %}
+                <details class="review-expander" data-persist-key="result-review-task-{{ task.id }}">
+                  <summary>🧭 工作室管理者验收记录（{{ task.reviews|length }} 轮，最新：{% if task.reviews[-1].passed %}✅ 验收通过{% else %}🔁 验收未通过 / 已触发返工{% endif %}{% if task.reviews[-1].score is not none %} · 评分 {{ task.reviews[-1].score }}{% endif %}）</summary>
+                  {% for item in task.reviews %}
+                  <div class="review-item">
+                    <b>第 {{ item.round or '?' }} 轮 · {% if item.passed %}✅ 通过{% else %}🔁 未通过{% endif %} · {{ item.time or '' }}</b>
+                    {% if item.summary %}<p class="caption">{{ item.summary }}</p>{% endif %}
+                    {% if item.suggestions %}<div class="review-suggestions">{{ item.suggestions }}</div>{% endif %}
+                  </div>
+                  {% endfor %}
+                </details>
+                {% endif %}
+                <div class="markdown-body">{{ task.output_html|safe }}</div>
+                {% if task.id == 9 %}
+                <details class="st-expander" data-persist-key="result-task9-preview">
+                  <summary>📑 飞书文档渲染预览（含分镜表格）</summary>
+                  <div class="markdown-body">{{ task.output_html|safe }}</div>
+                </details>
+                {% endif %}
+              {% endif %}
+            {% elif store.running_task == task.id %}
+              <div class="st-alert info">⏳ 正在执行…完成后这里会显示该任务产出。</div>
+            {% else %}
+              <p class="caption">尚未执行。</p>
+            {% endif %}
+          </details>
+          {% endfor %}
+        </section>
+      </section>
+
+      <aside class="wb-right">
+        <div class="right-title-row">
+          <div class="panel-title">🔗 流水线 & 运行日志</div>
+          <button class="collapse-btn" type="button" onclick="toggleRightbar()" aria-label="收起右栏">⏴</button>
+        </div>
+        <h5>🔗 协作流水线 · 9 大任务</h5>
+        <div class="pv">
+          <div class="pipeline">
+            {% for task in pipeline_rows %}
+            <div class="pnode" style="border-color:{{ task.color }};background:{{ task.bg }}">
+              <span class="pn-id" style="color:{{ task.color }}">任务 {{ task.id }}</span>
+              <b>{{ task.short }}</b>
+              <span class="pn-owner">{{ task.owner_emoji }} {{ task.owner_name }}</span>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="legend"><span style="color:#16a34a">●已完成</span>　<span style="color:#5147ff">●工作中</span>　<span style="color:#d8a500">●可执行</span>　<span style="color:#b8b3a6">●等待依赖</span></div>
+        </div>
+        {% if log_text %}
+        <hr>
+        <details class="st-expander" {% if store.is_running %}open{% endif %}>
+          <summary>🛰️ 运行过程日志（实时 · 刷新/重连不丢失）</summary>
+	          <pre class="log" data-log-scroll="run-log" data-running="{% if store.is_running %}1{% else %}0{% endif %}">{{ log_text }}</pre>
+        </details>
+        {% endif %}
+      </aside>
+    </section>
+    {% endif %}
+
+    {% if tab == 'settings' %}
+    <section class="settings-page">
+      <hr>
+      <h3>🛠️ 数字员工 & 协作方式设定（可查看 / 可编辑）</h3>
+      <p class="caption">默认展示产品内置设定；你可以直接修改或输入自己的设定。修改后将作为「数字员工的角色与技能」以及「每个任务的协作方式」在执行时的实际依据。</p>
+      <form method="post" action="/settings">
+	        <details class="st-expander">
+          <summary>🧑‍💼 数字员工设定：角色介绍 / 工作技能（可编辑）</summary>
+          {% for emp in employees %}
+          <h4>{{ emp.emoji }} {{ emp.name }} · {{ emp.title }}</h4>
+          <button type="submit" formaction="/settings/reset/emp/{{ emp.key }}" formmethod="post" {% if store.is_running %}disabled{% endif %}>↩︎ 恢复默认设定</button>
+          <label>角色介绍：</label>
+          <textarea name="emp_intro_{{ emp.key }}" rows="7" {% if store.is_running %}disabled{% endif %}>{{ emp.intro }}</textarea>
+          <label>工作技能（每行一条，可自由增删 / 改写）：</label>
+          <textarea name="emp_skills_{{ emp.key }}" rows="8" {% if store.is_running %}disabled{% endif %}>{{ emp.skills }}</textarea>
+          <hr>
+          {% endfor %}
+        </details>
+	        <details class="st-expander">
+          <summary>📋 各任务协作方式 / 工作方法（可查看 / 可编辑）</summary>
+          {% for task in tasks %}
+          <h4>任务 {{ task.id }} · {{ task.title }}　{{ task.owner_emoji }} {{ task.owner_name }}</h4>
+          <p class="caption">{{ task.desc }}</p>
+          {% if task.id == 9 %}<p class="caption">提示：任务9为文档拼装（不调用模型），此处协作方式仅作说明展示。</p>{% endif %}
+          <button type="submit" formaction="/settings/reset/task/{{ task.id }}" formmethod="post" {% if store.is_running %}disabled{% endif %}>↩︎ 恢复默认</button>
+          <label>协作方式 / 工作方法：</label>
+          <textarea name="task_method_{{ task.id }}" rows="8" {% if store.is_running %}disabled{% endif %}>{{ task_methods[task.id] }}</textarea>
+          <hr>
+          {% endfor %}
+        </details>
+        <button class="primary" {% if store.is_running %}disabled{% endif %}>保存设定中心</button>
+      </form>
+
+      <hr>
+      <h3>🧑‍💼 数字员工档案（默认设定）</h3>
+      <div class="profile-grid">
+        {% for emp in employees %}
+	        <details class="st-expander profile-card" data-persist-key="profile-{{ emp.key }}">
+          <summary>{{ emp.emoji }} {{ emp.name }}</summary>
+          <b>{{ emp.title }}</b>
+          <p class="caption">{{ emp.intro }}</p>
+          <b>🛠️ Agent 技能</b>
+          <ul>{% for skill in emp.agent_skills %}<li>{{ skill }}</li>{% endfor %}</ul>
+          <b>🔧 配套外部工具</b>
+          <p class="caption">{{ emp.tool }}</p>
+          <b>🤖 当前模型</b>：<code>{{ emp.config.provider }} / {{ emp.config.model }}</code>
+          <p><b>🧠 记忆（本次协作累积）</b></p>
+          {% if emp.memory %}<ul>{% for item in emp.memory %}<li>{{ item }}</li>{% endfor %}</ul>{% else %}<p class="caption">（暂无记忆，执行任务后自动写入）</p>{% endif %}
+        </details>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% if tab == 'docs' %}
+    <section class="docs-page">
+      <div class="panel-title">📚 交付文档库 · 任务9 最终飞书剧本文档（当前 + 历史）</div>
+      <p class="caption">每次「任务9 · 飞书归档」完成后，最终交付文档会自动归档到这里，可随时查看 / 下载当前与过去的成片剧本。</p>
+      {% if not doc_rows %}
+      <div class="st-alert info">暂无交付文档。完成「任务9 · 飞书归档」后，最终剧本飞书文档会自动出现在这里。</div>
+      {% else %}
+      <div class="doc-head">
+        <form method="post" action="/docs/clear"><button {% if store.is_running %}disabled{% endif %}>🗑 清空文档库</button></form>
+        <p class="caption">共 {{ doc_rows|length }} 份历史交付文档（最新在最上）。</p>
+      </div>
+      {% for doc in doc_rows %}
+      <details class="st-expander" {% if loop.first %}open{% endif %}>
+        <summary>📕 {{ doc.title }}　·　🕒 {{ doc.time }}</summary>
+        <div class="compact-actions">
+          <a class="download" href="/download/doc/{{ doc.original_index }}">📥 下载该飞书文档 (Markdown)</a>
+          {% if confirm_doc == doc.original_index %}
+          <form method="post" action="/docs/delete/{{ doc.original_index }}">
+            <button {% if store.is_running %}disabled{% endif %}>确认删除</button>
+          </form>
+          <a class="download" href="/?tab=docs">取消</a>
+          {% else %}
+          <a class="download" href="/?tab=docs&confirm_doc={{ doc.original_index }}">🗑 删除该文档</a>
+          {% endif %}
+        </div>
+        {% if confirm_doc == doc.original_index %}
+        <div class="st-alert warning">确认删除《{{ doc.title }}》？删除后仅从交付文档库移除，不影响当前任务产出。</div>
+        {% endif %}
+        <div class="markdown-body">{{ doc.content_html|safe }}</div>
+      </details>
+      {% endfor %}
+      {% endif %}
+    </section>
+    {% endif %}
+
+    <hr>
+    <p class="footer">© AI Agent 短剧剧本工作室 - zhangzhou.01@bytedance.com </p>
+  </main>
+  <script>
+    const UI_CACHE_PREFIXES = [
+      "scriptStudioDetails:",
+      "scriptStudioSidebarCollapsed",
+      "scriptStudioSidebarWidth",
+      "scriptStudioRightCollapsed",
+	      "scriptStudioDarkMode",
+	      "scriptStudioLogScroll"
+    ];
+    const SIDEBAR_MIN_WIDTH = 260;
+    const SIDEBAR_MAX_WIDTH = 560;
+
+    function sidebarMaxWidth() {
+      return Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, Math.round(window.innerWidth * 0.48)));
+    }
+
+    function setSidebarWidth(width, persist = true) {
+      const clamped = Math.max(SIDEBAR_MIN_WIDTH, Math.min(sidebarMaxWidth(), Math.round(width)));
+      document.documentElement.style.setProperty("--sidebar-width", clamped + "px");
+      if (persist) {
+        localStorage.setItem("scriptStudioSidebarWidth", String(clamped));
+      }
+    }
+
+    function applyStoredLayout() {
+      const savedSidebarWidth = parseInt(localStorage.getItem("scriptStudioSidebarWidth") || "", 10);
+      if (!Number.isNaN(savedSidebarWidth)) {
+        setSidebarWidth(savedSidebarWidth, false);
+      }
+      if (localStorage.getItem("scriptStudioSidebarCollapsed") === "1") {
+        document.body.classList.add("sidebar-collapsed");
+      }
+      if (localStorage.getItem("scriptStudioRightCollapsed") === "1") {
+        document.body.classList.add("right-collapsed");
+      }
+      if (localStorage.getItem("scriptStudioDarkMode") === "1") {
+        document.body.classList.add("dark-mode");
+      }
+	      refreshDarkModeButton();
+      document.querySelectorAll("details[data-persist-key]").forEach((node) => {
+        const saved = localStorage.getItem("scriptStudioDetails:" + node.dataset.persistKey);
+        if (saved === "1") node.open = true;
+        if (saved === "0") node.open = false;
+        node.addEventListener("toggle", () => {
+          localStorage.setItem("scriptStudioDetails:" + node.dataset.persistKey, node.open ? "1" : "0");
+        });
+      });
+    }
+
+    function toggleSidebar() {
+      document.body.classList.toggle("sidebar-collapsed");
+      localStorage.setItem(
+        "scriptStudioSidebarCollapsed",
+        document.body.classList.contains("sidebar-collapsed") ? "1" : "0"
+      );
+    }
+    function toggleRightbar() {
+      document.body.classList.toggle("right-collapsed");
+      localStorage.setItem(
+        "scriptStudioRightCollapsed",
+        document.body.classList.contains("right-collapsed") ? "1" : "0"
+      );
+    }
+    function initSidebarResize() {
+      const handle = document.getElementById("sidebar-resize-handle");
+      if (!handle) return;
+      let dragging = false;
+      handle.addEventListener("pointerdown", (event) => {
+        if (document.body.classList.contains("sidebar-collapsed")) return;
+        dragging = true;
+        document.body.classList.add("sidebar-resizing");
+        handle.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      });
+      handle.addEventListener("pointermove", (event) => {
+        if (!dragging) return;
+        setSidebarWidth(event.clientX);
+      });
+      const stopDragging = (event) => {
+        if (!dragging) return;
+        dragging = false;
+        document.body.classList.remove("sidebar-resizing");
+        if (handle.hasPointerCapture(event.pointerId)) {
+          handle.releasePointerCapture(event.pointerId);
+        }
+      };
+      handle.addEventListener("pointerup", stopDragging);
+      handle.addEventListener("pointercancel", stopDragging);
+      window.addEventListener("resize", () => {
+        const current = parseInt(localStorage.getItem("scriptStudioSidebarWidth") || "", 10);
+        if (!Number.isNaN(current)) {
+          setSidebarWidth(current, true);
+        }
+      });
+    }
+    function toggleApiKeyVisibility(button) {
+      const row = button.closest(".api-key-row");
+      const input = row ? row.querySelector(".api-key-input") : null;
+      if (!input || input.disabled) return;
+      const shouldShow = input.type === "password";
+      input.type = shouldShow ? "text" : "password";
+      button.textContent = shouldShow ? "隐藏" : "显示";
+      button.setAttribute("aria-pressed", shouldShow ? "true" : "false");
+      input.focus();
+    }
+
+	    function getRunLogNode() {
+	      return document.querySelector('[data-log-scroll="run-log"]');
+	    }
+
+	    function saveLogScroll() {
+	      const log = getRunLogNode();
+	      if (!log) return;
+	      const distanceToBottom = log.scrollHeight - log.clientHeight - log.scrollTop;
+	      localStorage.setItem("scriptStudioLogScrollTop", String(log.scrollTop));
+	      localStorage.setItem("scriptStudioLogScrollPinnedBottom", distanceToBottom <= 24 ? "1" : "0");
+	    }
+
+	    function restoreLogScroll() {
+	      const log = getRunLogNode();
+	      if (!log) return;
+	      const savedTop = parseInt(localStorage.getItem("scriptStudioLogScrollTop") || "", 10);
+	      const pinnedBottom = localStorage.getItem("scriptStudioLogScrollPinnedBottom") === "1";
+	      const shouldDefaultToBottom = log.dataset.running === "1" && Number.isNaN(savedTop);
+	      requestAnimationFrame(() => {
+	        if (pinnedBottom || shouldDefaultToBottom) {
+	          log.scrollTop = log.scrollHeight;
+	        } else if (!Number.isNaN(savedTop)) {
+	          log.scrollTop = Math.min(savedTop, Math.max(0, log.scrollHeight - log.clientHeight));
+	        }
+	      });
+	      log.addEventListener("scroll", saveLogScroll, { passive: true });
+	      window.addEventListener("pagehide", saveLogScroll);
+	      window.addEventListener("beforeunload", saveLogScroll);
+	    }
+	    function refreshDarkModeButton() {
+	      const button = document.getElementById("dark-toggle-button");
+	      if (!button) return;
+	      const isDark = document.body.classList.contains("dark-mode");
+	      button.textContent = isDark ? "☀️ Light" : "🌙 Dark";
+	      button.title = isDark ? "Light mode" : "Dark mode";
+	      button.setAttribute("aria-label", isDark ? "切换浅色模式" : "切换深色模式");
+	    }
+    function toggleDarkMode() {
+      document.body.classList.toggle("dark-mode");
+      localStorage.setItem("scriptStudioDarkMode", document.body.classList.contains("dark-mode") ? "1" : "0");
+	      refreshDarkModeButton();
+    }
+    function clearUiCache() {
+      Array.from(localStorage.keys()).forEach((key) => {
+        if (UI_CACHE_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+          localStorage.removeItem(key);
+        }
+      });
+      window.location.reload();
+    }
+    applyStoredLayout();
+    initSidebarResize();
+	    restoreLogScroll();
+    {% if store.is_running %}
+    setInterval(() => {
+	      fetch("/health").then(() => {
+	        saveLogScroll();
+	        window.location.reload();
+	      }).catch(() => {});
+    }, 2000);
+    {% endif %}
+  </script>
+</body>
+</html>
