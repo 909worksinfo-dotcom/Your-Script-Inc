@@ -630,8 +630,9 @@ def index(request: Request, tab: str = "studio", mode: str = "auto", confirm_doc
     if mode not in {"auto", "manual"}:
         mode = "auto"
     return templates.TemplateResponse(
-        "app.html",
-        {"request": request, **_snapshot_view(tab, mode, confirm_doc=confirm_doc)},
+        request=request,
+        name="app.html",
+        context=_snapshot_view(tab, mode, confirm_doc=confirm_doc),
     )
 
 
