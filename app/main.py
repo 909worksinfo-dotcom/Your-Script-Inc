@@ -577,15 +577,8 @@ def _task8_outputs():
     return rows
 
 
-def _snapshot_view(tab, mode="auto", confirm_doc=None):
-    if store.is_running and not _thread_alive():
-        store.mark_interrupted(store.running_task)
-        store.log_line(f"⚠️ 后台线程已结束，任务{store.interrupted_task or '?'} 已标记为可继续执行。")
-
-    batches = get_batches(task8_target_episodes(store))
-    per_emp_enabled = bool(getattr(store, "per_emp", False))
-    tasks = _task_rows()
-    pipeline_rows = []
+def _runtime_pipeline_rows(tasks):
+    rows = []
     for task in tasks:
         if store.running_task == task["id"]:
             status_key = "run"
@@ -596,7 +589,42 @@ def _snapshot_view(tab, mode="auto", confirm_doc=None):
         else:
             status_key = "idle"
         color, bg = PIPELINE_PALETTE[status_key]
-        pipeline_rows.append({**task, "color": color, "bg": bg})
+        rows.append({
+            "id": task["id"],
+            "short": task["short"],
+            "owner_emoji": task["owner_emoji"],
+            "owner_name": task["owner_name"],
+            "color": color,
+            "bg": bg,
+        })
+    return rows
+
+
+def _runtime_payload():
+    tasks = _task_rows()
+    return {
+        "ok": True,
+        "running": bool(store.is_running),
+        "running_task": store.running_task,
+        "running_employee_label": _running_employee_label(),
+        "failed_task": store.failed_task,
+        "done_count": sum(1 for tid in TASK_ORDER if task_done(store, tid)),
+        "total_tasks": len(TASK_ORDER),
+        "pipeline_rows": _runtime_pipeline_rows(tasks),
+        "log_text": "\n".join(store.log[-200:]),
+        "last_saved_at": getattr(store, "last_saved_at", ""),
+    }
+
+
+def _snapshot_view(tab, mode="auto", confirm_doc=None):
+    if store.is_running and not _thread_alive():
+        store.mark_interrupted(store.running_task)
+        store.log_line(f"⚠️ 后台线程已结束，任务{store.interrupted_task or '?'} 已标记为可继续执行。")
+
+    batches = get_batches(task8_target_episodes(store))
+    per_emp_enabled = bool(getattr(store, "per_emp", False))
+    tasks = _task_rows()
+    pipeline_rows = _runtime_pipeline_rows(tasks)
     return {
         "tab": tab,
         "mode": mode,
@@ -964,3 +992,8 @@ def download_doc(index: int):
 @app.get("/health")
 def health():
     return {"ok": True, "running": store.is_running}
+
+
+@app.get("/api/runtime")
+def api_runtime():
+    return _runtime_payload()
