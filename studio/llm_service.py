@@ -36,8 +36,12 @@ except ImportError:
 
 
 # 服务商与可用模型（选项与原工具 foragent.py 完全一致；额外提供 Mock 用于离线演示）
+MOCK_PROVIDER = "Mock (演示)"
+PROVIDER_LABELS = {
+    MOCK_PROVIDER: "不选择",
+}
 PROVIDERS = [
-    "Mock (演示)",
+    MOCK_PROVIDER,
     "Azure OpenAI (ByteDance)",
     "OpenRouter",
     "Google Gemini",
@@ -45,7 +49,7 @@ PROVIDERS = [
     "Anthropic (Claude)",
 ]
 MODELS = {
-    "Mock (演示)": ["mock-studio-model"],
+    MOCK_PROVIDER: ["mock-studio-model"],
     "Azure OpenAI (ByteDance)": ["gpt-5.5-2026-04-24", "gemini-3.1-p", "gemini-3.1-p-priority", "gemini-3.5-flash", "test"],
     "OpenRouter": [
         "anthropic/claude-opus-4.8",
@@ -93,7 +97,7 @@ def _client_timeout():
 
 class LLMService:
     def __init__(self):
-        self.provider = "Mock (演示)"
+        self.provider = MOCK_PROVIDER
         self.api_key = ""
         self.model_name = ""
 
@@ -105,12 +109,12 @@ class LLMService:
     def generate(self, system_prompt: str, user_prompt: str, mock_key: str = None,
                  raise_on_error: bool = False) -> str:
         # 1. Mock 模式
-        if self.provider == "Mock (演示)":
+        if self.provider == MOCK_PROVIDER:
             return self._mock_response(user_prompt, mock_key)
 
         # 2. 真实 API 检查
         if not self.api_key:
-            return "❌ 错误：请在侧边栏为该数字员工填写 API Key（或切换为「Mock (演示)」走通流程）"
+            return "❌ 错误：请在侧边栏为该数字员工填写 API Key（或切换为「不选择」走通流程）"
         if not (self.model_name or "").strip():
             return "❌ 错误：请在侧边栏为该数字员工选择模型，或手动输入模型型号"
 
