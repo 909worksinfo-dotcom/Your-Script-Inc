@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 
 from studio.employees import EMPLOYEES, AGENT_SKILLS, default_skills_block
 from studio.tasks import TASK_MAP, TASK_ORDER, TASK_METHODS
-from studio.llm_service import PROVIDERS, MODELS
+from studio.llm_service import PROVIDERS, MODELS, PROVIDER_LABELS
 from studio.store_logic import (
     get_batches,
     is_ready,
@@ -231,6 +231,7 @@ def _config_for_render(cfg):
         model = ""
     return {
         "provider": provider,
+        "provider_label": PROVIDER_LABELS.get(provider, provider),
         "key": cfg.get("key", ""),
         "model": model,
     }
@@ -666,6 +667,17 @@ def _runtime_pipeline_rows(tasks):
     return rows
 
 
+def _runtime_employee_rows():
+    rows = []
+    for employee in _employee_rows():
+        rows.append({
+            "key": employee["key"],
+            "state": employee["state"],
+            "pin_title": employee["pin_title"],
+        })
+    return rows
+
+
 def _runtime_payload():
     tasks = _task_rows()
     return {
@@ -677,6 +689,7 @@ def _runtime_payload():
         "api_failure_hint": _api_failure_hint_needed(),
         "done_count": sum(1 for tid in TASK_ORDER if task_done(store, tid)),
         "total_tasks": len(TASK_ORDER),
+        "employee_rows": _runtime_employee_rows(),
         "pipeline_rows": _runtime_pipeline_rows(tasks),
         "log_text": "\n".join(store.log[-200:]),
         "last_saved_at": getattr(store, "last_saved_at", ""),
@@ -701,6 +714,7 @@ def _snapshot_view(tab, mode="auto", confirm_doc=None):
         "tasks": tasks,
         "pipeline_rows": pipeline_rows,
         "providers": PROVIDERS,
+        "provider_labels": PROVIDER_LABELS,
         "models": MODELS,
         "global_config": _global_config_for_render(),
         "task_methods": {tid: store.task_methods.get(tid, TASK_METHODS[tid]) for tid in TASK_ORDER},
